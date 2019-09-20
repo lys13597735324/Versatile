@@ -1,0 +1,45 @@
+import json
+import re
+import requests
+
+from scrapy import Spider, Request
+from pyquery import PyQuery as pq
+from ..items import ImgItem
+from ..get_words import read_keywords_list
+from json import loads
+import urllib.parse
+
+
+class ImgspiderSpider(Spider):
+    name = "img_yandex"
+
+    def __init__(self, *args, **kwargs):
+        self.allowed_domains = ["yandex.com"]
+
+    def start_requests(self):
+        keywords = read_keywords_list()
+        pages = 60
+
+        for keyword in keywords:
+
+            for page_num in range(0, pages):
+                # page_num = (page_num-1)*60 + 1
+
+                url = 'https://yandex.com/images/search?callback=jQuery21407860396524963145&yu=9135469491555490800&p={page}&text={keyword}&rpt=image&serpid=WT7c7FrZa0OuFBmOQONkoA&serpListType=horizontal&uinfo=sw-1920-sh-1080-ww-1920-wh-577-pd-1-wp-16x9_1920x1080&_=1555988770826'.format(keyword=keyword, page=page_num)
+                # print(url)
+                headers = {
+                    'cookie': 'csw=17; cpr=1; cpw=1496; cptrid=315x1555987134613; cph=385; yandexuid=9135469491555490800; i=n9Sn+rGyGsZNQV9a40iwuRa3VcWbU31oyY76Ojl3KjAPU6uUH9Bs4cLJMLS56vAkcA9pXNMdIwJL4i6wPkN3H24ZnQc=; mda=0; yandex_gid=20930; _ym_uid=15554909911069628967; zm=m-white_com.webp.css-https%3Awww_7WF-zHBFcEQdQOitdM7NXH1DFRo%3Al; _ym_wasSynced=%7B%22time%22%3A1555985494542%2C%22params%22%3A%7B%22eu%22%3A0%7D%2C%22bkParams%22%3A%7B%7D%7D; _ym_d=1555985495; _ym_isad=2; spravka=dD0xNTU1OTg1NTU2O2k9MTI1LjEyMC4yMjIuMTA4O3U9MTU1NTk4NTU1NjA5NDY4NzA1OTtoPTU2Mzg4MzIwMzlhNzBmOGY1MTUyYzk4ZGJkNjk4NTY5; yp=1558082804.ygu.1#1556095839.szm.1:1920x1080:1920x577#1558577499.shlos.1#1556071901.ln_tp.01#1556071956.nps.8758794920%3Aclose; cycada=XE3p/J0+Guzaxj3UwlVO2tjdYnqKI0ObIes49Xg34Vc=',
+                }
+                yield Request(url=url, headers=headers, callback=self.parse)
+
+    def parse(self, response):
+        # self.cookie = response.request.headers.getlist('Cookie')
+        # print(type(response.text))
+        pattern = re.compile(r'\"img_href\":\"(.*?)\","useProxy"')
+        img_list = re.findall(pattern, response.text)
+        img_item = ImgItem()
+        for img_url in img_list:
+            img_item['img_url'] = img_url
+            img_item['img_website'] = self.name.split('_')[-1]
+            img_item['img_name'] = img_url.split('/')[-1]
+            yield img_item

@@ -1,0 +1,197 @@
+from __future__ import (print_function, division, absolute_import)
+from future.moves.urllib.parse import (unquote, urlencode, parse_qsl, urlsplit)
+from functools import reduce
+import scrapy
+from scrapy.exceptions import CloseSpider
+from scrapy_splash import SplashRequest
+import re
+from ..items import ImgItem
+
+import json
+from scrapy.settings import Settings
+
+
+#################################################################
+## Settings
+#################################################################
+
+class DefaultSettings(Settings):
+
+    # PROXY = 'socks5://localhost:80'
+
+    def __init__(self, value=None, priority='project'):
+        super(DefaultSettings, self).__init__(value, priority)
+
+        self.set('ROBOTSTXT_OBEY', False)
+        self.set('CONCURRENT_REQUESTS', 2)
+        self.set('COOKIES_ENABLED', False)
+        self.set('TELNETCONSOLE_ENABLED', False)
+        self.set('DEFAULT_REQUEST_HEADERS', {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.110 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.8,zh-CN;q=0.6,zh;q=0.4,jv;q=0.2',
+        })
+
+        self.set('DUPLICATE_FIELD', 'id')
+
+
+class JavascriptSettings(DefaultSettings):
+    """With Javascript enabled."""
+
+    # SPLASH_PROXY = 'socks5://172.17.0.1:1080'
+    # SPLASH_PROXY = DefaultSettings.PROXY
+
+    def __init__(self, value=None, priority='project'):
+        super(JavascriptSettings, self).__init__(value, priority)
+
+        spider_middlewares = self.get('SPIDER_MIDDLEWARES', {})
+        spider_middlewares['scrapy_splash.SplashDeduplicateArgsMiddleware'] = 100
+        self.set('SPIDER_MIDDLEWARES', spider_middlewares)
+
+        downloader_middlewares = self.get('DOWNLOADER_MIDDLEWARES', {})
+        downloader_middlewares['scrapy_splash.SplashCookiesMiddleware'] = 723
+        downloader_middlewares['scrapy_splash.SplashMiddleware'] = 725
+        downloader_middlewares['scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware'] = 810
+        self.get('DOWNLOADER_MIDDLEWARES', downloader_middlewares)
+
+        self.set('SPLASH_URL', 'http://localhost:8050')
+        self.set('DUPEFILTER_CLASS', 'scrapy_splash.SplashAwareDupeFilter')
+        self.set('HTTPCACHE_STORAGE', 'scrapy_splash.SplashAwareFSCacheStorage')
+
+
+#################################################################
+## Pipelines
+#################################################################
+
+class DuplicatePipeline(object):
+
+    def __init__(self):
+        self.have_seen = set()
+
+    def process_item(self, item, spider):
+        field = spider.settings['DUPLICATE_FIELD']
+        if item[field] in self.have_seen:
+            pass
+        else:
+            self.have_seen.add(item[field])
+            return item
+
+
+class JsonWriterPipeline(object):
+
+    def open_spider(self, spider):
+        self.file = open('items.json', 'w')
+
+    def close_spider(self, spider):
+        self.file.close()
+
+    def process_item(self, item, spider):
+        line = json.dumps(dict(item)) + "\n"
+        self.file.write(line)
+        return item
+
+#################################################################
+## Spiders Setting
+#################################################################
+
+class BaseSpider(scrapy.Spider):
+
+    def __init__(self, reqlimit=10):
+        super(BaseSpider, self).__init__()
+
+        self.reqlimit = reqlimit
+        self.reqcount = 0
+
+    def start_requests(self):
+        raise NotImplementedError('Stub!')
+
+    def start_requests(self):
+        raise NotImplementedError('Stub!')
+
+class JavascriptSpider(BaseSpider):
+
+    def __init__(self, reqlimit=10):
+        super(JavascriptSpider, self).__init__(reqlimit=reqlimit)
+
+        self.splash_args = {
+            # 'proxy': JavascriptSettings.SPLASH_PROXY,
+            'wait': 3,
+            'images': 0
+        }
+
+#################################################################
+## Items
+#################################################################
+
+class GoogleImageItem(scrapy.Item):
+    link = scrapy.Field()
+    width = scrapy.Field(serializer=str)
+    height = scrapy.Field(serializer=str)
+
+#################################################################
+## Spiders
+#################################################################
+
+class GoogleImageSettings(JavascriptSettings):
+
+    def __init__(self):
+        super(GoogleImageSettings, self).__init__()
+        self.set('DUPLICATE_FIELD', 'link')
+
+        item_pipelines = self.get('ITEM_PIPELINES', {})
+        item_pipelines['google_image.DuplicatePipeline'] = 300
+        item_pipelines['google_image.JsonWriterPipeline'] = 800
+
+
+
+
+keyword = "old man"
+
+class ImgspiderSpider(JavascriptSpider):
+    name = 'img_google'
+
+    base_url = 'https://www.google.com'
+
+    def __init__(self, reqlimit=50, minsize='320x480'):
+        super(ImgspiderSpider, self).__init__(reqlimit=reqlimit)
+        self.keyword = keyword
+        self.minsize = reduce(lambda x, y: x*y, map(lambda n:int(n), minsize.split('x')))
+
+    def start_requests(self):
+        # full color, photo, labeled for reuse with modification
+        tbs = 'tbs=ic:color,itp:photo'
+        # tbs = 'tbs=ic:color,itp:photo,sur:fmc'
+        url = 'https://www.google.com/search?{}&newwindow=1&tbm=isch&tbo=u&source=univ&sa=X&ved=0ahUKEwiTguXRid7TAhULl1QKHQZTD3UQsAQIJg&biw=19181&bih=968&' + tbs
+        yield SplashRequest(url.format(urlencode({'q':self.keyword})), self.parse, args=self.splash_args)
+
+    def parse(self, response):
+        basename = response.url.split('?')[0].split('/')[-1]
+        if basename == 'imgres':
+            try:
+                new_url = response.css('a._hes::attr(href)')[-1].extract()
+                yield SplashRequest(self.base_url + new_url, self.parse, args=self.splash_args)
+            except Exception:
+                pass
+        else: #search page
+            hrefs = response.css('a.rg_l::attr(href)').extract()
+            for href in hrefs:
+                params = dict(parse_qsl(urlsplit(href).query))
+                width = int(params.get('w', 0))
+                height = int(params.get('h', 0))
+                if width > 0 and height > 0 and width*height < self.minsize:
+                    continue
+                try:
+                    tmp = href.split('&')[0]
+                    link = unquote(tmp[tmp.find('=')+1:])
+                    # yield ImgItem(img_url=link)
+                    yield GoogleImageItem(link=link, width=width, height=height)
+                    self.reqcount += 1
+                    if self.reqcount < self.reqlimit:
+                        yield SplashRequest(self.base_url + href, self.parse, args=self.splash_args)
+                except Exception:
+                    pass
+
+
+        
+
+

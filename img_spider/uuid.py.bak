@@ -1,0 +1,34 @@
+from psutil import net_if_addrs
+
+for k, v in net_if_addrs().items():
+    for item in v:
+        address = item[1]
+        # if ':' in address and len(address)==17:
+        if len(address) == 17:
+            print(address)
+
+
+import socket
+#获取本机电脑名
+myname = socket.getfqdn(socket.gethostname())
+print(myname)
+
+#
+# import uuid
+# address = hex(uuid.getnode())[2:]
+# tt= '-'.join(address[i:i+2] for i in range(0, len(address), 2))
+# print(tt)
+
+# ! /usr/bin/env python
+
+from fcntl import ioctl
+import socket
+import struct
+import sys
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+mac = ioctl(sock.fileno(), 0x8927, struct.pack('eth0'))
+mac = socket.inet_ntoa(mac[18:24])
+print(mac)
+

@@ -1,0 +1,45 @@
+import json
+import re
+import requests
+
+from scrapy import Spider, Request
+from pyquery import PyQuery as pq
+from ..items import ImgItem
+from ..get_words import read_keywords_list
+from json import loads
+import urllib.parse
+
+
+class ImgspiderSpider(Spider):
+    name = "img_tukuchina"
+
+    def __init__(self, *args, **kwargs):
+        self.allowed_domains = ["tukuchina.cn"]
+
+    def start_requests(self):
+        keywords = read_keywords_list()
+        # keywords = ['美女', '萝莉']
+        pages = 20
+
+        for keyword in keywords:
+            for page_num in range(1, pages):
+
+                url = 'http://www.tukuchina.cn/index.php?r=photo/search&q={keyword}&type=&cate=s&Photo_page={pages}&yt1=GO'.format(keyword=keyword, pages=page_num)
+
+                yield Request(url=url, callback=self.parse)
+
+    def parse(self, response):
+        # print(response.text)
+        # print(type(response.text))
+        html = response.text
+        doc = pq(html)
+        img_item = doc('.items .searchLi img').items()
+        img_Item = ImgItem()
+        for img in img_item:
+            img_url = img.attr('data-bigimg')
+            print(img_url)
+            if img_url != None:
+                img_Item['img_url'] = img_url.split('?')[0]
+                img_Item['img_website'] = self.name.split('_')[-1]
+                img_Item['img_name'] = img_url.split('/')[-1].split('?')[0]
+                yield img_Item
